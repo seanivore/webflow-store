@@ -1,12 +1,14 @@
 import os
 import re
 import sys
+from pathlib import Path
 
-# CDN base URL pattern (adjust if needed, captures the domain part)
-CDN_DOMAIN = "cdn.prod.website-files.com"
-# Regex to find the full CDN path up to the filename
-# It handles potential variations in the path structure before the filename
-cdn_base_pattern = re.compile(r'https?://' + re.escape(CDN_DOMAIN) + r'/[^\"\'\s]+/')
+# --- REMOVED CDN Patterns ---
+# CDN_DOMAIN = "cdn.prod.website-files.com"
+# cdn_base_pattern = re.compile(r'https?://' + re.escape(CDN_DOMAIN) + r'/[^\"\'\s]+/')
+
+# Pattern to find the hex prefix (start of filename)
+hex_prefix_pattern = re.compile(r'^[0-9a-f]+_')
 
 # List of image extensions to target
 IMAGE_EXTENSIONS = {'.webp', '.png', '.jpg', '.jpeg', '.gif', '.svg'}
@@ -24,87 +26,113 @@ def calculate_relative_path(file_path, root_dir):
     else:
         return path_to_root
 
-def get_relative_image_path(base_filename, path_to_root, assets_folder="assets/images"):
-     """Constructs the full relative path to the image."""
-     # If path_to_root is '.', the image path starts from the current dir
-     if path_to_root == '.':
-         return f"{assets_folder}/{base_filename}"
-     else:
-         return f"{path_to_root}/{assets_folder}/{base_filename}"
+def get_relative_image_path(base_filename, root_prefix, assets_folder="assets/images"):
+    """Constructs the full relative path to the image using root_prefix."""
+    return f"{root_prefix}{assets_folder}/{base_filename}"
 
 def replace_cdn_urls_in_html(html_content, file_path, workspace_root):
-    """Replaces CDN image URLs in src and srcset attributes with relative paths."""
+    """Replaces *incorrectly* generated relative image URLs by removing the hex prefix."""
     modified_content = html_content
     modified = False
-    path_to_root = calculate_relative_path(file_path, workspace_root)
+    relative_file_path = Path(os.path.relpath(file_path, workspace_root))
+    folder_depth = len(relative_file_path.parts) - 1
+    root_prefix = '../' * folder_depth
 
-    # --- Function to process a single URL ---
-    def process_url(url):
+    # --- Function to process an existing relative path ---
+    def process_existing_relative_path(path_match):
         nonlocal modified
-        try:
-            base_filename = url.split('?')[0].split('/')[-1] # Get filename, ignore query params
+        full_path = path_match.group(1) # e.g., ../assets/images/HEX_filename.webp
+        path_parts = full_path.split('/')
+        original_base_filename = path_parts[-1]
+
+        # Check if it has the hex prefix
+        if hex_prefix_pattern.match(original_base_filename):
+            base_filename = hex_prefix_pattern.sub('', original_base_filename)
             file_ext = os.path.splitext(base_filename)[1].lower()
 
             if file_ext in IMAGE_EXTENSIONS:
-                relative_img_path = get_relative_image_path(base_filename, path_to_root)
-                # Basic check: Does the local file potentially exist? (Case-insensitive check helpful)
-                # Note: This is a simple check; a more robust check would list assets/images once.
-                # We'll rely on the export being complete for now.
-                # print(f"    Replacing: {url} -> {relative_img_path}") # Verbose logging
-                modified = True
-                return relative_img_path
-        except Exception as e:
-            print(f"    WARN: Error processing URL {url} in {file_path}: {e}", file=sys.stderr)
-        return None # Return None if not an image or error
+                # Reconstruct the *correct* relative path using the *current* file's depth
+                correct_relative_path = get_relative_image_path(base_filename, root_prefix)
+                if full_path != correct_relative_path:
+                    print(f"    Correcting: {original_base_filename} -> {base_filename} (Path: {correct_relative_path})")
+                    modified = True
+                    return correct_relative_path
+                else:
+                    # Path might already be correct if depth = 0 and no prefix was removed
+                    # print(f"    Skipping already correct path: {full_path}")
+                    pass
+            else:
+                print(f"    WARN: Non-image extension found in existing path: {original_base_filename} in {file_path}", file=sys.stderr)
+        # else: # Path doesn't have the hex prefix, assume it's correct or unrelated
+            # print(f"    Skipping path without hex prefix: {full_path}")
+        return None # Indicate no replacement needed for this specific match
+
+    # --- Regex to find existing potentially incorrect relative paths ---
+    # Matches variations like: ../assets/images/..., ./assets/images/..., assets/images/...
+    # Ensures it only captures paths ending with known image extensions.
+    # It captures the full relative path in group 1.
+    relative_path_pattern = re.compile(r'([.\\/]*assets/images/[^\"\'\\s?#]+\.(?:webp|png|jpg|jpeg|gif|svg))', re.IGNORECASE)
 
     # --- Replace in src attributes ---
-    # Pattern: src="<CDN_URL>"
-    src_pattern = re.compile(r'src=["\'](https?://' + re.escape(CDN_DOMAIN) + r'/[^\"\']+)["\']', re.IGNORECASE)
+    # Explicitly define the combined pattern for src
+    src_pattern = re.compile(r'src=[\"\']([.\\/]*assets/images/[^\"\'\\s?#]+\.(?:webp|png|jpg|jpeg|gif|svg))[\"\']', re.IGNORECASE)
     def replace_src_match(match):
-        url = match.group(1)
-        new_path = process_url(url)
-        if new_path:
-            print(f"  [src] Replaced {url.split('/')[-1]} with {new_path}")
-            return f'src="{new_path}"'
-        return match.group(0) # Return original if not replaced
+        corrected_path = process_existing_relative_path(match)
+        if corrected_path:
+            return f'src="' + corrected_path + '"'
+        return match.group(0) # Return original if not corrected
 
     modified_content = src_pattern.sub(replace_src_match, modified_content)
 
     # --- Replace in srcset attributes ---
-    # Pattern: srcset="<URL1> 500w, <URL2> 1080w, ..."
-    srcset_pattern = re.compile(r'srcset=["\']([^\"\']+)["\']', re.IGNORECASE)
+    srcset_pattern = re.compile(r'srcset=[\"\']([^\"\']+)[\"\']', re.IGNORECASE)
     def replace_srcset_match(match):
         srcset_value = match.group(1)
         parts = srcset_value.split(',')
         new_parts = []
         set_modified = False
-        logged_set = False # Log only once per srcset
+        logged_set = False
 
         for part in parts:
             part = part.strip()
             if not part: continue
-            url_part = part.split(None, 1) # Split URL from descriptor like "500w"
+            url_part = part.split(None, 1) # Split URL from descriptor
             url = url_part[0]
             descriptor = url_part[1] if len(url_part) > 1 else ""
 
-            if CDN_DOMAIN in url:
-                new_path = process_url(url)
-                if new_path:
-                    new_parts.append(f"{new_path} {descriptor}".strip())
+            # Check if this url matches our relative path pattern
+            path_match = relative_path_pattern.match(url)
+            if path_match:
+                corrected_path = process_existing_relative_path(path_match)
+                if corrected_path:
+                    new_parts.append(f"{corrected_path} {descriptor}".strip())
                     set_modified = True
                     if not logged_set:
-                         print(f"  [srcset] Replaced {url.split('/')[-1]} (and possibly others) with relative paths")
-                         logged_set = True
+                        print(f"  [srcset] Corrected {path_match.group(2).split('_')[-1]} (and possibly others) to relative paths")
+                        logged_set = True
                 else:
-                    new_parts.append(part) # Keep original if processing failed
+                    new_parts.append(part) # Keep original if processing decided not to change
             else:
-                new_parts.append(part) # Keep original if not a CDN URL
+                new_parts.append(part) # Keep non-matching URLs
 
         if set_modified:
-            return f'srcset="{", ".join(new_parts)}"'
+            nonlocal modified
+            modified = True # Ensure overall modified flag is set
+            return f'srcset="' + ", ".join(new_parts) + '"'
         return match.group(0) # Return original if no changes in this srcset
 
     modified_content = srcset_pattern.sub(replace_srcset_match, modified_content)
+
+    # --- Replace in href attributes ---
+    # Explicitly define the combined pattern for href
+    href_pattern = re.compile(r'href=[\"\']([.\\/]*assets/images/([0-9a-f]+_[^\"\'\\s?#]+\.(?:webp|png|jpg|jpeg|gif|svg)))[\"\']', re.IGNORECASE)
+    def replace_href_match(match):
+        corrected_path = process_existing_relative_path(match)
+        if corrected_path:
+            return f'href="' + corrected_path + '"'
+        return match.group(0) # Return original if not corrected
+
+    modified_content = href_pattern.sub(replace_href_match, modified_content)
 
     return modified_content, modified
 
