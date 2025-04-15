@@ -71,11 +71,11 @@ def replace_cdn_urls_in_html(html_content, file_path, workspace_root):
     # Matches variations like: ../assets/images/..., ./assets/images/..., assets/images/...
     # Ensures it only captures paths ending with known image extensions.
     # It captures the full relative path in group 1.
-    relative_path_pattern = re.compile(r'([.\\/]*assets/images/[^\"\'\\s?#]+\.(?:webp|png|jpg|jpeg|gif|svg))', re.IGNORECASE)
+    relative_path_pattern = re.compile(r'([.\\\/]*assets/images/[^\"\'\\s?#]+\.(?:webp|png|jpg|jpeg|gif|svg))', re.IGNORECASE)
 
     # --- Replace in src attributes ---
     # Explicitly define the combined pattern for src
-    src_pattern = re.compile(r'src=[\"\']([.\\/]*assets/images/[^\"\'\\s?#]+\.(?:webp|png|jpg|jpeg|gif|svg))[\"\']', re.IGNORECASE)
+    src_pattern = re.compile(r'src=[\"\']([.\\\/]*assets/images/[^\"\'\\s?#]+\.(?:webp|png|jpg|jpeg|gif|svg))[\"\']', re.IGNORECASE)
     def replace_src_match(match):
         corrected_path = process_existing_relative_path(match)
         if corrected_path:
@@ -125,7 +125,7 @@ def replace_cdn_urls_in_html(html_content, file_path, workspace_root):
 
     # --- Replace in href attributes ---
     # Explicitly define the combined pattern for href
-    href_pattern = re.compile(r'href=[\"\']([.\\/]*assets/images/([0-9a-f]+_[^\"\'\\s?#]+\.(?:webp|png|jpg|jpeg|gif|svg)))[\"\']', re.IGNORECASE)
+    href_pattern = re.compile(r'href=[\"\']([.\\\/]*assets/images/([0-9a-f]+_[^\"\'\\s?#]+\.(?:webp|png|jpg|jpeg|gif|svg)))[\"\']', re.IGNORECASE)
     def replace_href_match(match):
         corrected_path = process_existing_relative_path(match)
         if corrected_path:
