@@ -1,10 +1,12 @@
 {
 	"folders": [
-		{
-			"path": "/Users/seanivore/Development/_resources/ai-dev-docs/"
-		},
-		{
-			"path": "/Users/seanivore/Development/webflow-store/"
-		}
-	]
+        {
+            "name": "ai-dev-docs",
+            "path": "../../_resources/ai-dev-docs"
+        },
+        {
+            "name": "webflow-store",
+            "path": ".."
+        }
+    ]
 }

@@ -6,6 +6,8 @@ This was started, damaged, and ended up being all we have to work with.
 - Git is set up to "git push" 
 - But just FYI Git branch is also "webflow-store" 
 
+The entire repository is now indexed in Cursor for you! 
+
 Once the website is working locally, we will be pushing it to Github Pages/Jekyll. 
 - I have already created the _config.yml file for this 
 - The CNAME file is already created 
